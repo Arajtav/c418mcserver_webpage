@@ -68,8 +68,8 @@ export default function Home() {
     const [seller, setSeller] = useState<string>("");
     // Max price from the input.
     const [maxPrice, setMaxPrice] = useState<number>(0);
-    // Min and max price in the filtered sales.
-    const [priceRange, setPriceRange] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
+    /// All distinct prices, always has at least 2 elements.
+    const [prices, setPrices] = useState<number[]>([0, 0]);
     // Whether the settings tab is open.
     const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
 
@@ -154,11 +154,27 @@ export default function Home() {
                 return a.rid - b.rid;
             });
         setSalesFiltered(filtered);
-        const min = filtered.length ? pricePerStack(filtered[0]) : 0;
-        const max = filtered.length ? pricePerStack(filtered[filtered.length - 1]) : 0;
-        setPriceRange({ min, max });
 
-        setMaxPrice(maxPrice || max);
+        const prices = [];
+        let prev = undefined;
+        for (const item of filtered) {
+            const p = pricePerStack(item);
+            if (p != prev) {
+                prices.push(p);
+                prev = p;
+            }
+        }
+
+        if (prices.length == 1) {
+            prices.push(prices[0]);
+        }
+
+        if (prices.length == 0) {
+            prices.push(0, 0);
+        }
+
+        setPrices(prices);
+        setMaxPrice(maxPrice || prices[prices.length - 1]);
     }, [itemId, seller, sales, searchDistance, limitByDistance, sellerBlacklist, baseLocation]);
 
     return (
@@ -186,7 +202,7 @@ export default function Home() {
                         setItemid={setItemId}
                         seller={seller}
                         setSeller={setSeller}
-                        priceRange={priceRange}
+                        prices={prices}
                         maxPrice={maxPrice}
                         setMaxPrice={setMaxPrice}
                     />
@@ -195,7 +211,7 @@ export default function Home() {
             <main className="h-full grow overflow-scroll portrait:p-2 p-2 md:p-4 lg:p-8">
                 {salesFiltered
                     .filter(sale => {
-                        let current_max = clip(priceRange.min, priceRange.max, maxPrice);
+                        let current_max = clip(prices[0], prices[prices.length - 1], maxPrice);
                         return !current_max || pricePerStack(sale) <= current_max;
                     })
                     .map(sale => (
@@ -216,7 +232,7 @@ function SearchBar({
     setItemid,
     seller,
     setSeller,
-    priceRange,
+    prices,
     maxPrice,
     setMaxPrice,
 }: {
@@ -224,10 +240,29 @@ function SearchBar({
     setItemid: Dispatch<SetStateAction<string>>;
     seller: string;
     setSeller: Dispatch<SetStateAction<string>>;
-    priceRange: { min: number; max: number };
+    prices: number[];
     maxPrice: number;
     setMaxPrice: Dispatch<SetStateAction<number>>;
 }) {
+    const sliderMin = 0;
+    const sliderMax = 100;
+
+    const alpha = 0.15;
+
+    const priceToSlider = (price: number) => {
+        const min = prices[0];
+        const max = prices[prices.length - 1];
+        const t = (price - min) / (max - min);
+        return sliderMin + Math.pow(t, alpha) * (sliderMax - sliderMin);
+    };
+
+    const sliderToPrice = (sliderValue: number) => {
+        const min = prices[0];
+        const max = prices[prices.length - 1];
+        const t = (sliderValue - sliderMin) / (sliderMax - sliderMin);
+        return min + Math.pow(t, 1 / alpha) * (max - min);
+    };
+
     return (
         <>
             <input
@@ -249,16 +284,22 @@ function SearchBar({
                 }}
             />
             <label className="w-full h-24 px-4 flex justify-center items-start text-2xl flex-col text-neutral-400">
-                <div>{`max stack price: ${niceRound(clip(priceRange.min, priceRange.max, maxPrice))}`}</div>
+                <div>{`max stack price: ${niceRound(clip(prices[0], prices[prices.length - 1], maxPrice))}`}</div>
+                <datalist id="prices">
+                    {prices.map(p => (
+                        <option key={p} value={priceToSlider(p)} />
+                    ))}
+                </datalist>
                 <input
                     type="range"
-                    className={`w-full drop-shadow-xs accent-neutral-400 hover:accent-neutral-300 focus:outline-hidden focus:accent-neutral-300 ${priceRange.min == priceRange.max ? "invisible" : ""}`}
+                    min={sliderMin}
+                    max={sliderMax}
+                    className={`w-full drop-shadow-xs accent-neutral-400 hover:accent-neutral-300 focus:outline-hidden focus:accent-neutral-300 ${prices[0] == prices[1] ? "invisible" : ""}`}
                     step="any"
-                    value={clip(priceRange.min, priceRange.max, maxPrice)}
-                    min={priceRange.min}
-                    max={priceRange.max}
+                    list="prices"
+                    value={priceToSlider(clip(prices[0], prices[prices.length - 1], maxPrice))}
                     onInput={e => {
-                        setMaxPrice(Number(e.currentTarget.value));
+                        setMaxPrice(sliderToPrice(Number(e.currentTarget.value)));
                     }}
                 />
             </label>
