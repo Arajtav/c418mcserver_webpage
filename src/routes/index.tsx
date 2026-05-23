@@ -1,8 +1,7 @@
 "use client";
 
-import { Sidebar } from "@/sidebar";
+import { Sidebar } from "../components/sidebar";
 import { Location, SaleDataT } from "@/types";
-import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import {
     clip,
     dist3d,
@@ -11,8 +10,9 @@ import {
     pricePerStack,
     niceRound,
     formatDistance,
-} from "./utils";
-import { useLocalStorage } from "usehooks-ts";
+} from "../utils";
+import { Accessor, createEffect, createResource, createSignal, onMount, Setter } from "solid-js";
+import { makePersisted } from "@solid-primitives/storage";
 
 function SaleEntry({
     sale,
@@ -20,30 +20,26 @@ function SaleEntry({
     setSeller,
 }: {
     sale: SaleDataT & { distance: number };
-    setItemId: Dispatch<SetStateAction<string>>;
-    setSeller: Dispatch<SetStateAction<string>>;
+    setItemId: Setter<string>;
+    setSeller: Setter<string>;
 }) {
     return (
-        <div className="w-full text-xs sm:text-sm md:text-base lg:text-lg xl:text-2xl flex flex-row h-16 glass items-center justify-between">
-            <div className="h-full lg:w-1/3 flex flex-row items-center">
+        <div class="w-full text-xs sm:text-sm md:text-base lg:text-lg xl:text-2xl flex flex-row h-16 glass items-center justify-between">
+            <div class="h-full lg:w-1/3 flex flex-row items-center">
                 <img
                     alt=""
-                    className="cursor-pointer h-12 w-12 mx-2"
+                    class="cursor-pointer h-12 w-12 mx-2"
                     src={`/api/textures/1.21.8?t=${sale.mcItemId}`}
-                    onClick={() => {
-                        setItemId(sale.mcItemId);
-                    }}
+                    onClick={() => setItemId(sale.mcItemId)}
                 />
-                <div className="hidden md:block capitalize">
-                    {sale.mcItemId.replaceAll("_", " ")}
-                </div>
+                <div class="hidden md:block capitalize">{sale.mcItemId.replaceAll("_", " ")}</div>
             </div>
-            <div className="h-full w-1/3 grow lg:grow-0 flex flex-row items-center justify-center">
+            <div class="h-full w-1/3 grow lg:grow-0 flex flex-row items-center justify-center">
                 {formatPriceString(sale.price, sale.quantity)}
             </div>
-            <div className="h-full w-1/3 flex flex-row items-center justify-end pr-2 gap-[1ch]">
+            <div class="h-full w-1/3 flex flex-row items-center justify-end pr-2 gap-[1ch]">
                 <span
-                    className="cursor-pointer"
+                    class="cursor-pointer"
                     onClick={() => {
                         setSeller(sale.shop.seller);
                     }}
@@ -59,51 +55,61 @@ function SaleEntry({
 
 export default function Home() {
     // Fetched sales.
-    const [sales, setSales] = useState<SaleDataT[]>([]);
+    const [sales, setSales] = createSignal<SaleDataT[]>([]);
     // Filtered sales (except for the price).
-    const [salesFiltered, setSalesFiltered] = useState<(SaleDataT & { distance: number })[]>([]);
+    const [salesFiltered, setSalesFiltered] = createSignal<(SaleDataT & { distance: number })[]>(
+        []
+    );
     // Item id from the input.
-    const [itemId, setItemId] = useState<string>("");
+    const [itemId, setItemId] = createSignal("");
     // Seller from the input.
-    const [seller, setSeller] = useState<string>("");
+    const [seller, setSeller] = createSignal("");
     // Max price from the input.
-    const [maxPrice, setMaxPrice] = useState<number>(0);
-    /// All distinct prices, always has at least 2 elements.
-    const [prices, setPrices] = useState<number[]>([0, 0]);
+    const [maxPrice, setMaxPrice] = createSignal(0);
+    // Min and max price in the filtered sales.
+    const [priceRange, setPriceRange] = createSignal({ min: 0, max: 0 });
     // Whether the settings tab is open.
-    const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+    const [settingsOpen, setSettingsOpen] = createSignal(false);
 
     // The persistent config from the settings tab.
-    const [searchDistance, setSearchDistance] = useLocalStorage("searchDistance", 1);
-    const [limitByDistance, setLimitByDistance] = useLocalStorage("limitByDistance", false);
-    const [sellerBlacklist, setSellerBlacklist] = useLocalStorage("sellerBlacklist", "");
-    const [baseLocation, setBaseLocation] = useLocalStorage("baseLocation", { x: 0, y: 0, z: 0 });
+    const [searchDistance, setSearchDistance] = makePersisted(createSignal(1), {
+        name: "searchDistance",
+    });
+    const [limitByDistance, setLimitByDistance] = makePersisted(createSignal(false), {
+        name: "limitByDistance",
+    });
+    const [sellerBlacklist, setSellerBlacklist] = makePersisted(createSignal(""), {
+        name: "sellerBlacklist",
+    });
+    const [baseLocation, setBaseLocation] = makePersisted(createSignal({ x: 0, y: 0, z: 0 }), {
+        name: "baseLocation",
+    });
 
     // Read the settings, fetch the sales.
-    useEffect(() => {
+    onMount(() => {
         fetch("/api/sales")
             .then(res => res.json())
             .then((data: SaleDataT[]) => {
                 setSales(data);
             });
-    }, []);
+    });
 
     // Filter the sales.
-    useEffect(() => {
-        let filtered = sales
+    createEffect(() => {
+        let filtered = sales()
             // TODO: free stuff breaks the code.
             .filter(sale => sale.price >= 0)
             // Block sellers from the blacklist.
             .filter(sale => {
-                if (!sellerBlacklist) return true;
-                return !sellerBlacklist
+                if (!sellerBlacklist()) return true;
+                return !sellerBlacklist()
                     .split(";")
                     .map(s => s.trim())
                     .includes(sale.shop.seller);
             })
             // Show only searched sellers.
             .filter(sale => {
-                const sellers = seller
+                const sellers = seller()
                     .split(";")
                     .map(s => s.trim())
                     .filter(Boolean);
@@ -113,9 +119,9 @@ export default function Home() {
             })
             // Show only searched items.
             .filter(sale => {
-                if (!itemId.trim()) return true;
+                if (!itemId().trim()) return true;
 
-                return itemId
+                return itemId()
                     .split(";")
                     .map(s => s.trim())
                     .filter(Boolean)
@@ -128,15 +134,15 @@ export default function Home() {
             })
             // Whitespace search.
             .filter(sale => {
-                if (itemId.trim()) return true;
-                if (!itemId) return true;
+                if (itemId().trim()) return true;
+                if (!itemId()) return true;
                 return sale.mcItemId.includes("_");
             })
             .map(sale => {
-                return { ...sale, distance: dist3d(sale.shop.location, baseLocation) };
+                return { ...sale, distance: dist3d(sale.shop.location, baseLocation()) };
             })
             // Limit by search distance when enabled.
-            .filter(sale => !limitByDistance || searchDistance >= sale.distance)
+            .filter(sale => !limitByDistance() || searchDistance() >= sale.distance)
             .toSorted((a, b) => {
                 // Cheapest stuff first.
                 const priceDifference = pricePerStack(a) - pricePerStack(b);
@@ -154,38 +160,22 @@ export default function Home() {
                 return a.rid - b.rid;
             });
         setSalesFiltered(filtered);
+        const min = filtered.length ? pricePerStack(filtered[0]) : 0;
+        const max = filtered.length ? pricePerStack(filtered[filtered.length - 1]) : 0;
+        setPriceRange({ min, max });
 
-        const prices = [];
-        let prev = undefined;
-        for (const item of filtered) {
-            const p = pricePerStack(item);
-            if (p != prev) {
-                prices.push(p);
-                prev = p;
-            }
-        }
-
-        if (prices.length == 1) {
-            prices.push(prices[0]);
-        }
-
-        if (prices.length == 0) {
-            prices.push(0, 0);
-        }
-
-        setPrices(prices);
-        setMaxPrice(maxPrice || prices[prices.length - 1]);
-    }, [itemId, seller, sales, searchDistance, limitByDistance, sellerBlacklist, baseLocation]);
+        setMaxPrice(maxPrice || max);
+    });
 
     return (
-        <div className="w-screen h-screen overflow-clip flex flex-row portrait:flex-col">
+        <div class="w-screen h-screen overflow-clip flex flex-row portrait:flex-col">
             <Sidebar
                 links={[
                     { title: "SETTINGS", href: () => setSettingsOpen(!settingsOpen) },
                     { title: "CREDITS", href: "/credits" },
                 ]}
             >
-                {settingsOpen ? (
+                {settingsOpen() ? (
                     <Settings
                         limitByDistance={limitByDistance}
                         setLimitByDistance={setLimitByDistance}
@@ -198,29 +188,24 @@ export default function Home() {
                     />
                 ) : (
                     <SearchBar
-                        itemId={itemId}
+                        itemId={itemId()}
                         setItemid={setItemId}
-                        seller={seller}
+                        seller={seller()}
                         setSeller={setSeller}
-                        prices={prices}
-                        maxPrice={maxPrice}
+                        priceRange={priceRange()}
+                        maxPrice={maxPrice()}
                         setMaxPrice={setMaxPrice}
                     />
                 )}
             </Sidebar>
-            <main className="h-full grow overflow-scroll portrait:p-2 p-2 md:p-4 lg:p-8">
-                {salesFiltered
+            <main class="h-full grow overflow-scroll portrait:p-2 p-2 md:p-4 lg:p-8">
+                {salesFiltered()
                     .filter(sale => {
-                        let current_max = clip(prices[0], prices[prices.length - 1], maxPrice);
+                        let current_max = clip(priceRange().min, priceRange().max, maxPrice());
                         return !current_max || pricePerStack(sale) <= current_max;
                     })
                     .map(sale => (
-                        <SaleEntry
-                            sale={sale}
-                            key={sale.rid}
-                            setItemId={setItemId}
-                            setSeller={setSeller}
-                        />
+                        <SaleEntry sale={sale} setItemId={setItemId} setSeller={setSeller} />
                     ))}
             </main>
         </div>
@@ -232,44 +217,25 @@ function SearchBar({
     setItemid,
     seller,
     setSeller,
-    prices,
+    priceRange,
     maxPrice,
     setMaxPrice,
 }: {
     itemId: string;
-    setItemid: Dispatch<SetStateAction<string>>;
+    setItemid: Setter<string>;
     seller: string;
-    setSeller: Dispatch<SetStateAction<string>>;
-    prices: number[];
+    setSeller: Setter<string>;
+    priceRange: { min: number; max: number };
     maxPrice: number;
-    setMaxPrice: Dispatch<SetStateAction<number>>;
+    setMaxPrice: Setter<number>;
 }) {
-    const sliderMin = 0;
-    const sliderMax = 100;
-
-    const alpha = 0.15;
-
-    const priceToSlider = (price: number) => {
-        const min = prices[0];
-        const max = prices[prices.length - 1];
-        const t = (price - min) / (max - min);
-        return sliderMin + Math.pow(t, alpha) * (sliderMax - sliderMin);
-    };
-
-    const sliderToPrice = (sliderValue: number) => {
-        const min = prices[0];
-        const max = prices[prices.length - 1];
-        const t = (sliderValue - sliderMin) / (sliderMax - sliderMin);
-        return min + Math.pow(t, 1 / alpha) * (max - min);
-    };
-
     return (
         <>
             <input
                 type="text"
                 value={itemId}
                 placeholder="search by item id"
-                className="search-item focus:outline-hidden p-4 w-full h-16 hover:placeholder:text-neutral-300 placeholder:text-neutral-400 placeholder:text-2xl bg-transparent drop-shadow-xs text-2xl"
+                class="search-item focus:outline-hidden p-4 w-full h-16 hover:placeholder:text-neutral-300 placeholder:text-neutral-400 placeholder:text-2xl bg-transparent drop-shadow-xs text-2xl"
                 onInput={e => {
                     setItemid(e.currentTarget.value);
                 }}
@@ -278,28 +244,22 @@ function SearchBar({
                 type="text"
                 value={seller}
                 placeholder="search by seller"
-                className="search-sell focus:outline-hidden p-4 w-full h-16 hover:placeholder:text-neutral-300 placeholder:text-neutral-400 placeholder:text-2xl bg-transparent drop-shadow-xs text-2xl"
+                class="search-sell focus:outline-hidden p-4 w-full h-16 hover:placeholder:text-neutral-300 placeholder:text-neutral-400 placeholder:text-2xl bg-transparent drop-shadow-xs text-2xl"
                 onInput={e => {
                     setSeller(e.currentTarget.value);
                 }}
             />
-            <label className="w-full h-24 px-4 flex justify-center items-start text-2xl flex-col text-neutral-400">
-                <div>{`max stack price: ${niceRound(clip(prices[0], prices[prices.length - 1], maxPrice))}`}</div>
-                <datalist id="prices">
-                    {prices.map(p => (
-                        <option key={p} value={priceToSlider(p)} />
-                    ))}
-                </datalist>
+            <label class="w-full h-24 px-4 flex justify-center items-start text-2xl flex-col text-neutral-400">
+                <div>{`max stack price: ${niceRound(clip(priceRange.min, priceRange.max, maxPrice))}`}</div>
                 <input
                     type="range"
-                    min={sliderMin}
-                    max={sliderMax}
-                    className={`w-full drop-shadow-xs accent-neutral-400 hover:accent-neutral-300 focus:outline-hidden focus:accent-neutral-300 ${prices[0] == prices[1] ? "invisible" : ""}`}
+                    class={`w-full drop-shadow-xs accent-neutral-400 hover:accent-neutral-300 focus:outline-hidden focus:accent-neutral-300 ${priceRange.min == priceRange.max ? "invisible" : ""}`}
                     step="any"
-                    list="prices"
-                    value={priceToSlider(clip(prices[0], prices[prices.length - 1], maxPrice))}
+                    value={clip(priceRange.min, priceRange.max, maxPrice)}
+                    min={priceRange.min}
+                    max={priceRange.max}
                     onInput={e => {
-                        setMaxPrice(sliderToPrice(Number(e.currentTarget.value)));
+                        setMaxPrice(Number(e.currentTarget.value));
                     }}
                 />
             </label>
@@ -317,58 +277,58 @@ function Settings({
     baseLocation,
     setBaseLocation,
 }: {
-    limitByDistance: boolean;
-    setLimitByDistance: Dispatch<SetStateAction<boolean>>;
-    searchDistance: number;
-    setSearchDistance: Dispatch<SetStateAction<number>>;
-    sellerBlacklist: string;
-    setSellerBlacklist: Dispatch<SetStateAction<string>>;
-    baseLocation: Location;
-    setBaseLocation: Dispatch<SetStateAction<Location>>;
+    limitByDistance: Accessor<boolean>;
+    setLimitByDistance: Setter<boolean>;
+    searchDistance: Accessor<number>;
+    setSearchDistance: Setter<number>;
+    sellerBlacklist: Accessor<string>;
+    setSellerBlacklist: Setter<string>;
+    baseLocation: Accessor<Location>;
+    setBaseLocation: Setter<Location>;
 }) {
     return (
         <>
-            <label className="p-4 w-full h-16 drop-shadow-xs text-2xl text-neutral-400">
+            <label class="p-4 w-full h-16 drop-shadow-xs text-2xl text-neutral-400">
                 limit search distance:
                 <input
-                    className="ml-[1ch]"
+                    class="ml-[1ch]"
                     type="checkbox"
-                    checked={limitByDistance}
+                    checked={limitByDistance()}
                     onChange={e => {
                         setLimitByDistance(e.currentTarget.checked);
                     }}
                 />
             </label>
-            <label className="p-4 w-full h-16 drop-shadow-xs text-2xl text-neutral-400">
+            <label class="p-4 w-full h-16 drop-shadow-xs text-2xl text-neutral-400">
                 search distance:
                 <input
                     min="1"
-                    className="w-20 bg-transparent ml-[1ch] no-spin"
+                    class="w-20 bg-transparent ml-[1ch] no-spin"
                     type="number"
-                    value={searchDistance}
+                    value={searchDistance()}
                     onInput={e => {
                         setSearchDistance(Number(e.currentTarget.value));
                     }}
                 />
             </label>
-            <label className="p-4 w-full h-24 drop-shadow-xs text-2xl text-neutral-400">
+            <label class="p-4 w-full h-24 drop-shadow-xs text-2xl text-neutral-400">
                 sellers blacklist:
                 <input
-                    className="hover:placeholder:text-neutral-300 placeholder:text-neutral-400 text-neutral-200 bg-transparent w-full focus:outline-hidden"
+                    class="hover:placeholder:text-neutral-300 placeholder:text-neutral-400 text-neutral-200 bg-transparent w-full focus:outline-hidden"
                     placeholder="Player1;Player2"
-                    value={sellerBlacklist}
+                    value={sellerBlacklist()}
                     onInput={e => {
                         setSellerBlacklist(e.currentTarget.value);
                     }}
                 />
             </label>
-            <label className="p-4 w-full h-24 drop-shadow-xs text-2xl text-neutral-400">
+            <label class="p-4 w-full h-24 drop-shadow-xs text-2xl text-neutral-400">
                 base location:
-                <div className="text-neutral-200 w-full flex *:flex-1 *:w-full">
+                <div class="text-neutral-200 w-full flex *:flex-1 *:w-full">
                     <input
-                        className="no-spin"
+                        class="no-spin"
                         type="number"
-                        value={baseLocation.x}
+                        value={baseLocation().x}
                         onInput={e => {
                             setBaseLocation(bl => {
                                 return { ...bl, x: Number(e.currentTarget.value) };
@@ -376,9 +336,9 @@ function Settings({
                         }}
                     ></input>
                     <input
-                        className="no-spin"
+                        class="no-spin"
                         type="number"
-                        value={baseLocation.y}
+                        value={baseLocation().y}
                         onInput={e => {
                             setBaseLocation(bl => {
                                 return { ...bl, y: Number(e.currentTarget.value) };
@@ -386,9 +346,9 @@ function Settings({
                         }}
                     ></input>
                     <input
-                        className="no-spin"
+                        class="no-spin"
                         type="number"
-                        value={baseLocation.z}
+                        value={baseLocation().z}
                         onInput={e => {
                             setBaseLocation(bl => {
                                 return { ...bl, z: Number(e.currentTarget.value) };

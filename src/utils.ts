@@ -8,21 +8,6 @@ export function clip(min: number, max: number, val: number): number {
     return Math.min(max, Math.max(val, min));
 }
 
-export function nestObject(obj: Record<string, any>): Record<string, any> {
-    const result: Record<string, any> = {};
-    for (const [key, val] of Object.entries(obj)) {
-        const fragments = key.split("_");
-        let current = result;
-        for (let i = 0; i < fragments.length - 1; i++) {
-            const part = fragments[i];
-            current[part] ??= {};
-            current = current[part];
-        }
-        current[fragments[fragments.length - 1]] = val;
-    }
-    return result;
-}
-
 export function formatPriceString(price: number, quantity: number): string {
     const isStacked = !(quantity % 64);
     const amount = isStacked ? quantity / 64 : quantity;
